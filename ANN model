@@ -1,0 +1,181 @@
+# lag feature (sales history)
+daily_sales["lag1"] = daily_sales["Sales"].shift(1) # sales from yesterday
+daily_sales["lag7"] = daily_sales["Sales"].shift(7) # sales from 1 week ago
+
+# rolling feature (average sales)
+daily_sales["rolling7"] = (
+    daily_sales["Sales"]
+    .rolling(7)
+    .mean()
+)
+
+daily_sales["rolling14"] = (
+    daily_sales["Sales"]
+        .rolling(14)
+        .mean()
+)
+
+# calendar feature (from InvoiceDate)
+daily_sales["dayofweek"] = \
+    pd.to_datetime(
+        daily_sales["Date"]
+    ).dt.dayofweek
+
+daily_sales["month"] = \
+    pd.to_datetime(
+        daily_sales["Date"]
+    ).dt.month
+
+# remove missing values
+daily_sales = daily_sales.dropna()
+
+# split data
+# 70% training data; 15% validation data; 15% testing data
+train_size = int(
+    len(daily_sales) * 0.7
+)
+
+val_size = int(
+    len(daily_sales) * 0.15
+)
+
+train = daily_sales[:train_size]
+
+validation = daily_sales[
+    train_size:
+    train_size + val_size
+]
+
+test = daily_sales[
+    train_size + val_size:
+]
+
+# prepare features and target
+X = daily_sales[
+    [
+        "lag1",
+        "lag7",
+        "rolling7",
+        "rolling14"
+    ]
+]
+
+import numpy as np
+
+y = np.log1p(daily_sales["Sales"])
+
+# scale the data (to normalize)
+from sklearn.preprocessing import MinMaxScaler
+
+x_scaler = MinMaxScaler()
+y_scaler = MinMaxScaler()
+
+X_scaled = x_scaler.fit_transform(X)
+
+y_scaled = y_scaler.fit_transform(
+    y.values.reshape(-1, 1)
+)
+
+# split data (not shuffled)
+train_end = int(len(X_scaled)*0.7)
+val_end = int(len(X_scaled)*0.85)
+
+X_train = X_scaled[:train_end]
+X_val = X_scaled[train_end:val_end]
+X_test = X_scaled[val_end:]
+
+y_train = y_scaled[:train_end]
+y_val   = y_scaled[train_end:val_end]
+y_test  = y_scaled[val_end:]
+
+# ANN model
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Input
+
+model = Sequential([
+    Input(shape=(X_train.shape[1],)),
+    Dense(16, activation='relu'),
+    Dense(8, activation='relu'),
+    Dense(1)
+])
+
+# compile model
+from tensorflow.keras.optimizers import Adam
+
+model.compile(
+    optimizer=Adam(
+        learning_rate=0.1),
+    loss='mse',
+    metrics=['mae']
+)
+
+# early stopping
+from tensorflow.keras.callbacks import EarlyStopping
+
+early_stop = EarlyStopping(
+    monitor='val_loss',
+    patience=20,
+    restore_best_weights=True
+)
+
+# train ANN
+history = model.fit(
+    X_train,
+    y_train,
+    validation_data=(X_val, y_val),
+    epochs=200,
+    batch_size=8,
+    shuffle=False,
+    validation_split=0.2,
+    verbose=1
+)
+
+# generate predictions
+pred_scaled = model.predict(X_test)
+
+# undo MinMax scaling
+pred_log = y_scaler.inverse_transform(pred_scaled)
+actual_log = y_scaler.inverse_transform(y_test)
+
+# nndo log1p transformation
+pred = np.expm1(pred_log)
+actual = np.expm1(actual_log)
+
+# calculate MSE, RMSE, and MAPE
+from sklearn.metrics import mean_squared_error
+import numpy as np
+
+mse = mean_squared_error(actual, pred)
+rmse = np.sqrt(mse)
+
+mape = np.mean(
+    np.abs((actual - pred) / actual)
+) * 100
+
+print("MSE :", mse)
+print("RMSE:", rmse)
+print("MAPE:", mape)
+
+# sanity checks
+print("\nActual sample:")
+print(actual[:5].flatten())
+
+print("\nPredicted sample:")
+print(pred[:5].flatten())
+
+print("\nActual std:", actual.std())
+print("Predicted std:", pred.std())
+
+# visualise
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(12,6))
+
+plt.plot(actual,
+         label="Actual")
+
+plt.plot(pred,
+         label="Predicted")
+
+plt.legend()
+plt.show()
