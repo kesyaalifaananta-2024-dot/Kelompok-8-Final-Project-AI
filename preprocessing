@@ -1,0 +1,40 @@
+from ucimlrepo import fetch_ucirepo 
+  
+# fetch dataset 
+online_retail = fetch_ucirepo(id=352) 
+
+# copy data info
+df = online_retail.data.features.copy()
+
+import pandas as pd
+
+# data cleaning
+df = df[df["Quantity"] > 0]
+df = df[df["UnitPrice"] > 0]
+
+df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"])
+
+df["Revenue"] = (
+    df["Quantity"] *
+    df["UnitPrice"]
+)
+
+# aggregate daily sales
+daily_sales = (
+    df.groupby(
+        df["InvoiceDate"].dt.date
+    )["Revenue"]
+    .sum()
+    .reset_index()
+)
+
+daily_sales.columns = [
+    "Date",
+    "Sales"
+]
+
+# visualise
+import matplotlib.pyplot as plt
+
+plt.plot(daily_sales["Date"], daily_sales["Sales"])
+plt.show()
